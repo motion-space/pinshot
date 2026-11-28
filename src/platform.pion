@@ -247,6 +247,8 @@ extern "C" fn c_ps_install_cli(v : Ptr, vl : Int64) -> Int = "pion_ps_install_cl
 extern "C" fn c_ps_install_sync_meta(v : Ptr, vl : Int64) -> Unit = "pion_ps_install_sync_meta"
 extern "C" fn c_ps_swap_exe(p : Ptr, pl : Int64, s : Ptr, sl : Int64) -> Int = "pion_ps_swap_exe"
 extern "C" fn c_ps_open_url(u : Ptr, ul : Int64) -> Unit = "pion_ps_open_url"
+extern "C" fn c_ps_tr_render(id : Int, p : Ptr, pl : Int64, s : Ptr, sl : Int64, zh : Int) -> Int = "pion_ps_tr_render"
+extern "C" fn c_ps_http(id : Int, v : Ptr, vl : Int64, u : Ptr, ul : Int64, h : Ptr, hl : Int64, b : Ptr, bl : Int64, timeout_ms : Int) -> Int = "pion_ps_http"
 extern "C" fn c_ps_stdout(s : Ptr, sl : Int64) -> Unit = "pion_ps_stdout"
 
 fn ps_args() -> Bytes { take_mb_bytes(c_ps_args()) }
@@ -347,6 +349,24 @@ fn ps_swap_exe(path : Bytes, sha256 : Bytes) -> Int {
 }
 fn ps_open_url(url : Bytes) -> Unit {
   c_ps_open_url(bytes_data_ptr(url), url.length().to_int64())
+}
+fn ps_tr_render(id : Int, pic : Bytes, spec : String, zh : Int) -> Int {
+  let s = utf8_encode(spec)
+  c_ps_tr_render(id, bytes_data_ptr(pic), pic.length().to_int64(), bytes_data_ptr(s), s.length().to_int64(), zh)
+}
+fn ps_http(id : Int, verb : String, url : String, headers : String, body : String, timeout_ms : Int) -> Int {
+  let v = cstr(verb)
+  let u = cstr(url)
+  let h = cstr(headers)
+  let b = utf8_encode(body)
+  c_ps_http(
+    id,
+    bytes_data_ptr(v), v.length().to_int64(),
+    bytes_data_ptr(u), u.length().to_int64(),
+    bytes_data_ptr(h), h.length().to_int64(),
+    bytes_data_ptr(b), b.length().to_int64(),
+    timeout_ms,
+  )
 }
 
 fn close_window(wid : Int) -> Unit {

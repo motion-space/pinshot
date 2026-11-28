@@ -25,6 +25,8 @@ c_sources = [
   "native/startup_task.cpp",
   "native/install_win.c",
   "native/update_win.c",
+  "native/http_win.c",
+  "native/trpic_win.cpp",
   "native/ocr_win.cpp",
   "native/longshot_win.c",
   "native/record_win.cpp",
@@ -47,6 +49,8 @@ libs = [
   "shlwapi",
   "winmm",
   "winhttp",
+  "d2d1",
+  "dwrite",
   "bcrypt",
   "crypt32",
   "d3d11",
@@ -64,6 +68,7 @@ flags = [
   "-Wl,/DELAYLOAD:mfplat.dll",
   "-Wl,/DELAYLOAD:mfreadwrite.dll",
   "-Wl,/DELAYLOAD:gdiplus.dll",
+  "-Wl,/DELAYLOAD:d2d1.dll",
   "-Wl,/DELAYLOAD:d3dcompiler_47.dll",
   "-Wl,/DELAYLOAD:urlmon.dll",
   "-Wl,/DELAYLOAD:iphlpapi.dll",
@@ -79,6 +84,8 @@ c_sources = [
   "native/record_mac.m",
   "native/picture_mac.m",
   "native/update_mac.m",
+  "native/http_mac.m",
+  "native/trpic_mac.m",
 ]
 cc_flags = ["-O2", "-fobjc-arc"]
 frameworks = [
@@ -92,6 +99,7 @@ frameworks = [
   "AVFoundation",
   "VideoToolbox",
   "Vision",
+  "CoreText",
   "ServiceManagement",
   "Security",
   "UniformTypeIdentifiers",

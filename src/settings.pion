@@ -20,6 +20,12 @@ struct Settings {
   language : Int
   sound : Bool
   auto_update : Bool
+  tr_provider : String
+  tr_key_deepseek : String
+  tr_key_openai : String
+  tr_base : String
+  tr_model_deepseek : String
+  tr_model_openai : String
 }
 
 let key_choices : Array[(String, Int, Int)] = if hostapi::platform() == 0 {
@@ -132,6 +138,12 @@ fn default_settings() -> Settings {
     sound: true,
     language: 0,
     auto_update: false,
+    tr_provider: "google",
+    tr_key_deepseek: "",
+    tr_key_openai: "",
+    tr_base: "",
+    tr_model_deepseek: "",
+    tr_model_openai: "",
   }
 }
 
@@ -149,6 +161,12 @@ let settings : signals::Signal[Settings] = signals::signal_by(Settings::{
   sound: true,
   language: 0,
   auto_update: false,
+  tr_provider: "google",
+  tr_key_deepseek: "",
+  tr_key_openai: "",
+  tr_base: "",
+  tr_model_deepseek: "",
+  tr_model_openai: "",
 }, same=fn(a, b) { a == b })
 
 let capture_key_ok : signals::Signal[Bool] = signals::signal(true)
@@ -236,6 +254,16 @@ fn load_settings() -> Unit {
           "en" => 2
           _ => 0
         },
+        tr_provider: match text("tr_provider", "google") {
+          "deepseek" => "deepseek"
+          "openai" => "openai"
+          _ => "google"
+        },
+        tr_key_deepseek: jstr(o, "tr_key_deepseek", ""),
+        tr_key_openai: jstr(o, "tr_key_openai", ""),
+        tr_base: jstr(o, "tr_base", ""),
+        tr_model_deepseek: jstr(o, "tr_model_deepseek", ""),
+        tr_model_openai: jstr(o, "tr_model_openai", ""),
       }
     }
     _ => d
@@ -288,6 +316,12 @@ fn save_settings() -> Unit {
   o["sound"] = json_bool(s.sound)
   o["auto_update"] = json_bool(s.auto_update)
   o["language"] = json_str(["system", "zh", "en"][s.language])
+  o["tr_provider"] = json_str(s.tr_provider)
+  o["tr_key_deepseek"] = json_str(s.tr_key_deepseek)
+  o["tr_key_openai"] = json_str(s.tr_key_openai)
+  o["tr_base"] = json_str(s.tr_base)
+  o["tr_model_deepseek"] = json_str(s.tr_model_deepseek)
+  o["tr_model_openai"] = json_str(s.tr_model_openai)
   o["rec_fps"] = json_num(rec_fps.untracked().to_double())
   o["rec_cursor"] = json_bool(rec_cursor.untracked())
   o["rec_audio"] = json_bool(rec_audio.untracked())
@@ -367,6 +401,7 @@ fn open_settings(tab~ : Int = -1) -> Unit {
       "1" => settings_tab.set(1)
       "2" => settings_tab.set(2)
       "3" => settings_tab.set(3)
+      "4" => settings_tab.set(4)
       _ => ()
     }
   }
@@ -499,7 +534,7 @@ let set_card : Int64 = 0x222429FFL
 
 let settings_tab : signals::Signal[Int] = signals::signal(0)
 
-let settings_tabs : Array[String] = ["常规", "快捷键", "截图与贴图", "关于"]
+let settings_tabs : Array[String] = ["常规", "快捷键", "截图与贴图", "翻译", "关于"]
 
 fn settings_window(root : view::View) -> Unit {
   root.tree.hand_over_presses(false)
@@ -517,6 +552,7 @@ fn settings_window(root : view::View) -> Unit {
         k(ui::key_of_char('2'), "tab-1", ctrl),
         k(ui::key_of_char('3'), "tab-2", ctrl),
         k(ui::key_of_char('4'), "tab-3", ctrl),
+        k(ui::key_of_char('5'), "tab-4", ctrl),
       ]),
     ),
   )
@@ -533,17 +569,17 @@ fn settings_window(root : view::View) -> Unit {
     if recording.untracked() != 0 {
       return false
     }
-    settings_tab.set((settings_tab.untracked() + 3) % 4)
+    settings_tab.set((settings_tab.untracked() + settings_tabs.length() - 1) % settings_tabs.length())
     true
   })
   let _ = root.on_action("tab-next", fn(_) {
     if recording.untracked() != 0 {
       return false
     }
-    settings_tab.set((settings_tab.untracked() + 1) % 4)
+    settings_tab.set((settings_tab.untracked() + 1) % settings_tabs.length())
     true
   })
-  for i in 0..<4 {
+  for i in 0..<settings_tabs.length() {
     let _ = root.on_action("tab-\{i}", fn(_) {
       if recording.untracked() != 0 {
         return false
@@ -603,7 +639,7 @@ fn settings_window(root : view::View) -> Unit {
       let _ = main.box(fn(viewport) {
         let _ = viewport.over(view::Live::Is(true)).scrolls(view::Scroll::new(), fn(page) {
           let _ = page.padding(view::Live::Is((22.0, 18.0, 22.0, 20.0)))
-          let pages : Array[(view::View) -> Unit] = [general_page, keys_page, capture_page, about_page]
+          let pages : Array[(view::View) -> Unit] = [general_page, keys_page, capture_page, translate_page, about_page]
           for i, make in pages {
             let _ = page.box(fn(p) {
               let page_in = motion::NodeWay::new(if settings_tab.untracked() == i { 1.0 } else { 0.0 })
@@ -910,9 +946,9 @@ fn about_page(p : view::View) -> Unit {
     let _ = b.padding(view::Live::Is((4.0, 0.0, 4.0, 0.0))).gap(view::Live::Is(2.0))
     set_words(b, fn() {
       if updates_here() {
-        tr("免费、无广告，不收集任何数据；只在检查更新时联网。")
+        tr("免费、无广告，不收集任何数据；只在检查更新和你点「翻译」时联网。")
       } else {
-        tr("免费、无广告，不联网、不收集任何数据。")
+        tr("免费、无广告，不收集任何数据；只在你点「翻译」时联网。")
       }
     }, 12.0, set_muted)
     set_words(b, fn() { "© 2026 pengx17" }, 12.0, set_muted)

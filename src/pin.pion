@@ -41,6 +41,10 @@ struct Pin {
   ocr_click_at : signals::Ref[Double]
   ocr_click_word : signals::Ref[Int]
   ocr_clicks : signals::Ref[Int]
+  tr_on : signals::Signal[Bool]
+  tr : signals::Signal[PinTr]
+  tr_req : signals::Ref[Int]
+  tr_wanted : signals::Ref[Bool]
 }
 
 struct PinSizing {
@@ -151,6 +155,10 @@ fn open_pin(png : Bytes, x : Int, y : Int, w : Int, h : Int, zoom~ : Double = 1.
     ocr_click_at: signals::ref_new(-10000.0),
     ocr_click_word: signals::ref_new(-1),
     ocr_clicks: signals::ref_new(0),
+    tr_on: signals::signal(false),
+    tr: signals::signal_ref(TrIdle),
+    tr_req: signals::ref_new(0),
+    tr_wanted: signals::ref_new(false),
   }
   pins[what] = p
   let wid = ui::window_open_here(what)
@@ -199,6 +207,12 @@ fn pin_clipboard() -> Unit {
   let p = numbers_of(text_of(ps_pointer()))
   let (x, y) = if p.length() == 2 { (p[0].to_int() - w / 2, p[1].to_int() - h / 2) } else { (100, 100) }
   open_pin(b, x, y, w, h)
+  if ui::env("PINSHOT_TEST") != "" && ui::env("PINSHOT_TEST_TRANSLATE") != "" {
+    match pins.get("pin:\{pin_n.v}") {
+      Some(p) => pin_translate(p)
+      None => ()
+    }
+  }
 }
 
 fn pin_of_wid(wid : Int) -> Option[(String, Pin)] {
@@ -219,6 +233,7 @@ fn close_pin(wid : Int) -> Unit {
 fn pin_gone(wid : Int) -> Unit {
   guard pin_of_wid(wid) is Some((what, p)) else { return }
   pin_ocr_clear_pending(p)
+  pin_tr_forget(p)
   pins.remove(what)
   pin_roots.remove(wid)
   ui::forget_image(p.key.untracked())
@@ -349,6 +364,7 @@ fn orient_pin(p : Pin, turns : Int, flipped : Bool, zx : Double, zy : Double) ->
   signals::end_batch()
   ps_place(p.wid.v, (cx - nw / 2.0).round().to_int(), (cy - nh / 2.0).round().to_int(), nw.to_int(), nh.to_int(), 0, 0)
   pin_ocr_clear_pending(p)
+  pin_tr_clear(p)
   p.ocr_selecting.v = false
   signals::start_batch()
   p.ocr.set(Idle)
@@ -670,7 +686,12 @@ fn pin_menu(p : Pin) -> Unit {
       lines.push("copy-sel\t" + tr("复制选中文字") + "\t" + key_hint("Ctrl+C"))
       lines.push("copy-all\t" + tr("复制全部文字") + "\t")
     } else if ocr_ready {
-      lines.push("copy-all\t" + tr("复制全部文字") + "\t" + key_hint("Ctrl+C"))
+      lines.push("copy-all\t" + (if tr_shown_now(p) { tr("复制译文") } else { tr("复制全部文字") }) + "\t" + key_hint("Ctrl+C"))
+    }
+    if p.tr_on.untracked() {
+      lines.push("translate\t" + tr("显示原文") + "\t")
+    } else if !(p.ocr.untracked() is Failed(_)) {
+      lines.push("translate\t" + tr("翻译") + "\t")
     }
     lines.push("ocr-off\t" + tr("退出选字") + "\t" + key_hint("Ctrl+O"))
     lines.push("-")
@@ -680,6 +701,7 @@ fn pin_menu(p : Pin) -> Unit {
     lines.push("copy\t" + tr("复制") + "\t" + key_hint("Ctrl+C"))
     lines.push("save\t" + tr("另存为…") + "\t")
     lines.push("ocr\t" + tr("提取文字") + "\t" + key_hint("Ctrl+O"))
+    lines.push("translate\t" + tr("翻译") + "\t")
   }
   for item in [
     "-",
@@ -711,6 +733,7 @@ fn pin_menu(p : Pin) -> Unit {
     "copy" => copy_pin(p)
     "save" => save_pin(p)
     "ocr" => pin_start_ocr(p)
+    "translate" => pin_toggle_translate(p)
     "top" => {
       p.top.set(!top)
       ps_topmost(p.wid.v, if top { 0 } else { 1 }, 0)
@@ -794,7 +817,7 @@ fn pin_window(wid : Int, what : String) -> (view::View) -> Unit {
       if e != 0 {
         Some(edge_cursor(e))
       } else if p.ocr_on.get() {
-        match p.ocr.get() {
+        match pin_sel_state_get(p) {
           Ready(ws, _) if ws.length() > 0 => Some(view::Cursor::IBeam)
           _ => Some(view::Cursor::Arrow)
         }
@@ -812,7 +835,7 @@ fn pin_window(wid : Int, what : String) -> (view::View) -> Unit {
           if e != 0 {
             p.ocr_hover.set(-1)
           } else {
-            match p.ocr.untracked() {
+            match pin_sel_state(p) {
               Ready(ws, _) => p.ocr_hover.set(ocr_hit_word(ws, u, v, pw, ph))
               _ => p.ocr_hover.set(-1)
             }
@@ -834,7 +857,7 @@ fn pin_window(wid : Int, what : String) -> (view::View) -> Unit {
         _ => ()
       }
       if p.ocr_selecting.v && d.kind != view::DragIs::Down {
-        match p.ocr.untracked() {
+        match pin_sel_state(p) {
           Ready(ws, _) if ws.length() > 0 => {
             let (_, _, lw, lh) = root.laid_window_now()
             let (u, v) = if lw > 0.0 && lh > 0.0 {
@@ -910,7 +933,7 @@ fn pin_window(wid : Int, what : String) -> (view::View) -> Unit {
           }
         }
         if p.ocr_on.untracked() {
-          match p.ocr.untracked() {
+          match pin_sel_state(p) {
             Ready(ws, _) if ws.length() > 0 => {
               let (_, _, lw, lh) = root.laid_window_now()
               let (u, v, pw, ph) = if lw > 0.0 && lh > 0.0 {
@@ -954,7 +977,7 @@ fn pin_window(wid : Int, what : String) -> (view::View) -> Unit {
       }
     })
     let px = clampi(if p.w > p.h { p.w } else { p.h }, 1, 16384)
-    let _ = root.box(fn(i) { let _ = i.over(view::Live::Is(true)).image(view::Live::By(fn() { Some((p.key.get(), "", px)) })).presses(view::Live::Is(false)) })
+    let _ = root.box(fn(i) { let _ = i.over(view::Live::Is(true)).image(view::Live::By(fn() { Some((pin_shown_key(p), "", px)) })).presses(view::Live::Is(false)) })
     let _ = root.box(fn(lt) {
       let _ = lt.over(view::Live::Is(true)).presses(view::Live::Is(false)).picture(view::Live::By(fn() { ocr_overlay_picture(p, root.pointed()) }))
     })
@@ -1073,6 +1096,8 @@ fn pin_actions(root : view::View, p : Pin) -> Unit {
   on("close", fn() {
     if p.ocr_on.untracked() && p.ocr_sel.untracked().is_some() {
       p.ocr_sel.set(None)
+    } else if p.tr_on.untracked() {
+      pin_toggle_translate(p)
     } else if p.ocr_on.untracked() && !p.ocr_from_capture.v {
       pin_exit_ocr(p)
     } else {
@@ -1080,7 +1105,7 @@ fn pin_actions(root : view::View, p : Pin) -> Unit {
     }
   })
   on("copy", fn() {
-    if p.ocr_on.untracked() && p.ocr.untracked() is Ready(_, _) {
+    if p.ocr_on.untracked() && pin_sel_state(p) is Ready(_, _) {
       if !pin_copy_ocr_selected(p) {
         let _ = pin_copy_ocr_all(p)
       }
@@ -1090,7 +1115,7 @@ fn pin_actions(root : view::View, p : Pin) -> Unit {
   })
   on("select-all", fn() {
     if p.ocr_on.untracked() {
-      match p.ocr.untracked() {
+      match pin_sel_state(p) {
         Ready(ws, _) if ws.length() > 0 => p.ocr_sel.set(Some((0, ws.length() - 1)))
         _ => ()
       }
