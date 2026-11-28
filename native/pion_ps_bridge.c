@@ -21,6 +21,7 @@ extern int32_t ps_write_file(moonbit_bytes_t path, moonbit_bytes_t data);
 extern moonbit_bytes_t ps_save_dialog(int32_t wid, moonbit_bytes_t dir, moonbit_bytes_t name);
 extern moonbit_bytes_t ps_pick_folder(int32_t wid, moonbit_bytes_t dir);
 extern void ps_reveal(moonbit_bytes_t path);
+extern void ps_delete_file(moonbit_bytes_t path);
 extern moonbit_bytes_t ps_popup_menu(int32_t wid, moonbit_bytes_t lines);
 extern int32_t ps_ocr(int32_t id, moonbit_bytes_t png);
 extern moonbit_bytes_t ps_ocr_now(moonbit_bytes_t png);
@@ -99,6 +100,12 @@ void *pion_ps_pick_folder(int32_t wid, const uint8_t *dir, int64_t dl) {
   moonbit_bytes_t out = ps_pick_folder(wid, bd);
   moonbit_decref(bd);
   return out;
+}
+
+void pion_ps_delete_file(const uint8_t *p, int64_t pl) {
+  moonbit_bytes_t bp = mb_from(p, pl);
+  ps_delete_file(bp);
+  moonbit_decref(bp);
 }
 
 void pion_ps_reveal(const uint8_t *p, int64_t pl) {

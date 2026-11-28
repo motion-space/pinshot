@@ -135,6 +135,7 @@ fn told(json : String, bytes : Option[Bytes]) -> Unit {
       }
     "capture-failed" => toast(tr("截图失败，请重试。"))
     "pin-clipboard" => pin_clipboard()
+    "pin-restore" => restore_pin()
     "ocr" => ocr_told(o, bytes)
     "long" => {
       let n = fn(k : String) { jnum(o, k, 0.0).to_int() }
@@ -222,6 +223,7 @@ fn told(json : String, bytes : Option[Bytes]) -> Unit {
       match jstr(o, "item", "") {
         "capture" => ps_capture_ask()
         "pin-clip" => pin_clipboard()
+        "pin-restore" => restore_pin()
         "pins" => pins_toggle()
         "settings" => open_settings()
         "folder" => ps_reveal(cstr(settings.untracked().save_dir))

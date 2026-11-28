@@ -718,7 +718,7 @@ static HANDLE one_run;
 static HPOWERNOTIFY power_note;
 static int wts_note;
 
-enum { HK_CAPTURE = 1, HK_PIN_CLIP = 2, HK_PINS = 3, HK_MOST = 4 };
+enum { HK_CAPTURE = 1, HK_PIN_CLIP = 2, HK_PINS = 3, HK_RESTORE = 4, HK_MOST = 5 };
 static int hk_on[HK_MOST];
 
 static HICON own_icon(int size) {
@@ -848,6 +848,7 @@ static LRESULT CALLBACK tray_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
       }
       else if (wp == HK_PIN_CLIP) ps_tell("{\"do\":\"pin-clipboard\"}");
       else if (wp == HK_PINS) ps_tell("{\"do\":\"pins\"}");
+      else if (wp == HK_RESTORE) ps_tell("{\"do\":\"pin-restore\"}");
       return 0;
     case WM_PS_AGAIN:
       if (wp == 1) ps_tell("{\"do\":\"menu\",\"item\":\"settings\"}");
@@ -1574,6 +1575,27 @@ moonbit_bytes_t ps_read_file(moonbit_bytes_t path) {
   CloseHandle(f);
   if (!ok || got != (DWORD)sz.QuadPart) return moonbit_make_bytes(0, 0);
   return b;
+}
+
+void ps_delete_file(moonbit_bytes_t path) {
+  wchar_t *w = ps_wide((const char *)path);
+  if (w) {
+    DeleteFileW(w);
+    free(w);
+  }
+}
+
+int32_t ps_rect_shown(int32_t x, int32_t y, int32_t w, int32_t h) {
+  RECT r = {x, y, x + w, y + h};
+  if (w <= 0 || h <= 0) return 0;
+  HMONITOR m = MonitorFromRect(&r, MONITOR_DEFAULTTONULL);
+  if (!m) return 0;
+  MONITORINFO mi = {sizeof mi};
+  if (!GetMonitorInfoW(m, &mi)) return 0;
+  RECT in;
+  // (enough of it on a screen to take hold of: a quarter of its width and its top 24 pixels)
+  if (!IntersectRect(&in, &r, &mi.rcWork)) return 0;
+  return (in.right - in.left) * 4 >= w && in.top <= y + 24 && in.bottom - in.top >= (h < 24 ? h : 24);
 }
 
 int32_t ps_write_file(moonbit_bytes_t path, moonbit_bytes_t data) {

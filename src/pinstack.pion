@@ -1,0 +1,264 @@
+import "hostapi"
+import "json"
+import "pixels"
+import "signals"
+import "ui"
+
+struct Shelved {
+  slot : Int
+  x : Int
+  y : Int
+  w : Int
+  h : Int
+  zx : Double
+  zy : Double
+  turns : Int
+  flipped : Bool
+  alpha : Int
+  top : Bool
+}
+
+let shelf_most : Int = 50
+
+fn shelf_dir() -> String {
+  let data = text_of(ps_data_dir())
+  let local = ui::env("LOCALAPPDATA")
+  // (on Windows not in the roaming folder: pictures are not to travel with a profile)
+  if hostapi::platform() == 3 && local != "" {
+    let parts = data.split("\\")
+    file_in(file_in(local, parts[parts.length() - 1]), "pins")
+  } else {
+    file_in(data, "pins")
+  }
+}
+
+fn shelf_png(slot : Int) -> String {
+  file_in(shelf_dir(), "\{slot}.png")
+}
+
+fn shelf_parse(raw : String) -> Array[Shelved] {
+  let out : Array[Shelved] = []
+  guard json_of(raw) is Some(json::Json::Object(o)) else { return out }
+  match o.get("items") {
+    Some(json::Json::Array(items)) => {
+      for it in items {
+        match it {
+          json::Json::Object(e) => {
+            let n = fn(k : String) { jnum(e, k, 0.0) }
+            let slot = n("slot").to_int()
+            if slot < 0 || slot >= shelf_most {
+              continue
+            }
+            out.push(Shelved::{
+              slot,
+              x: n("x").to_int(),
+              y: n("y").to_int(),
+              w: n("w").to_int(),
+              h: n("h").to_int(),
+              zx: clamp(jnum(e, "zx", 1.0), 0.1, 8.0),
+              zy: clamp(jnum(e, "zy", 1.0), 0.1, 8.0),
+              turns: n("turns").to_int() & 3,
+              flipped: jbool(e, "flipped", false),
+              alpha: clampi(jnum(e, "alpha", 255.0).to_int(), 25, 255),
+              top: jbool(e, "top", true),
+            })
+          }
+          _ => ()
+        }
+      }
+    }
+    _ => ()
+  }
+  out
+}
+
+fn shelf_text(items : Array[Shelved]) -> String {
+  let arr : Array[json::Json] = []
+  for s in items {
+    let m : Map[String, json::Json] = Map::new()
+    m["slot"] = json_num(s.slot.to_double())
+    m["x"] = json_num(s.x.to_double())
+    m["y"] = json_num(s.y.to_double())
+    m["w"] = json_num(s.w.to_double())
+    m["h"] = json_num(s.h.to_double())
+    m["zx"] = json_num(s.zx)
+    m["zy"] = json_num(s.zy)
+    m["turns"] = json_num(s.turns.to_double())
+    m["flipped"] = json_bool(s.flipped)
+    m["alpha"] = json_num(s.alpha.to_double())
+    m["top"] = json_bool(s.top)
+    arr.push(json_obj_map(m))
+  }
+  let o : Map[String, json::Json] = Map::new()
+  o["items"] = json::Json::Array(arr)
+  json_stringify(json_obj_map(o))
+}
+
+fn shelf_read() -> Array[Shelved] {
+  shelf_parse(text_of(ps_read_file(cstr(file_in(shelf_dir(), "stack.json")))))
+}
+
+fn shelf_write(items : Array[Shelved]) -> Unit {
+  let _ = ps_write_file(cstr(file_in(shelf_dir(), "stack.json")), utf8_encode(shelf_text(items)))
+}
+
+fn shelf_free_slot(items : Array[Shelved]) -> Int {
+  for slot in 0..<shelf_most {
+    let mut used = false
+    for s in items {
+      if s.slot == slot {
+        used = true
+        break
+      }
+    }
+    if !used {
+      return slot
+    }
+  }
+  -1
+}
+
+fn shelf_push(items : Array[Shelved], s : Shelved) -> Array[Shelved] {
+  let out : Array[Shelved] = []
+  let skip = if items.length() >= shelf_most { items.length() - shelf_most + 1 } else { 0 }
+  for i in skip..<items.length() {
+    out.push(items[i])
+  }
+  out.push(s)
+  out
+}
+
+/// `p` kept on `items` (its picture written to a free slot); the stack as it is then.
+fn shelve_into(items : Array[Shelved], p : Pin) -> Array[Shelved] {
+  let r = numbers_of(text_of(ps_window_rect(p.wid.v)))
+  if r.length() < 4 {
+    return items
+  }
+  let kept : Array[Shelved] = []
+  let start = if items.length() >= shelf_most { items.length() - shelf_most + 1 } else { 0 }
+  for i in start..<items.length() {
+    kept.push(items[i])
+  }
+  let slot = shelf_free_slot(kept)
+  if slot < 0 {
+    return items
+  }
+  if ps_write_file(cstr(shelf_png(slot)), p.png) != 1 {
+    log("pin stack: could not keep the picture")
+    return items
+  }
+  let s = Shelved::{
+    slot,
+    x: r[0].round().to_int(),
+    y: r[1].round().to_int(),
+    w: r[2].round().to_int(),
+    h: r[3].round().to_int(),
+    zx: p.zx.untracked(),
+    zy: p.zy.untracked(),
+    turns: p.turns,
+    flipped: p.flipped,
+    alpha: p.alpha.untracked(),
+    top: p.top.untracked(),
+  }
+  shelf_push(kept, s)
+}
+
+fn shelve_pin(p : Pin) -> Unit {
+  let now = shelve_into(shelf_read(), p)
+  shelf_write(now)
+  log("pin stack: kept (\{now.length()} kept)")
+}
+
+/// Several pins kept at once (closing them all): the stack read and written once.
+fn shelve_pins(wids : Array[Int]) -> Unit {
+  let mut items = shelf_read()
+  for w in wids {
+    match pin_of_wid(w) {
+      Some((_, p)) if p.shelve.v => {
+        p.shelve.v = false
+        items = shelve_into(items, p)
+      }
+      _ => ()
+    }
+  }
+  shelf_write(items)
+  log("pin stack: \{wids.length()} kept at once (\{items.length()} kept)")
+}
+
+fn restore_pin() -> Unit {
+  let items = shelf_read()
+  while items.length() > 0 {
+    let s = items[items.length() - 1]
+    let _ = items.pop()
+    let file = cstr(shelf_png(s.slot))
+    let png = ps_read_file(file)
+    guard png.length() > 0 && pixels::image_size(png) is Some((w, h)) else { continue }
+    // (where it was, or under the pointer where that screen is gone)
+    let (x, y) = if ps_rect_shown(s.x, s.y, s.w, s.h) == 1 {
+      (s.x, s.y)
+    } else {
+      let q = numbers_of(text_of(ps_pointer()))
+      if q.length() == 2 { (q[0].to_int() - s.w / 2, q[1].to_int() - s.h / 2) } else { (100, 100) }
+    }
+    let before = pin_n.v
+    let plain = s.turns == 0 && !s.flipped && s.zx == s.zy
+    open_pin(png, x, y, w, h, zoom=if plain { s.zx } else { 1.0 })
+    if pin_n.v == before && find_pin_by_png(png).is_none() {
+      log("pin stack: \{s.slot} could not be opened")
+      return
+    }
+    shelf_write(items)
+    ps_delete_file(file)
+    if pin_n.v == before {
+      log("pin stack: \{s.slot} already open")
+      return
+    }
+    match pins.get("pin:\{pin_n.v}") {
+      Some(p) => {
+        if !plain {
+          orient_pin(p, s.turns, s.flipped, s.zx, s.zy)
+          ps_place(p.wid.v, x, y, s.w, s.h, 0, 0)
+        }
+        if s.alpha != p.alpha.untracked() {
+          set_alpha(p, s.alpha)
+        }
+        if s.top != p.top.untracked() {
+          p.top.set(s.top)
+          ps_topmost(p.wid.v, if s.top { 1 } else { 0 }, 0)
+        }
+      }
+      None => ()
+    }
+    log("pin stack: \{s.slot} back (\{items.length()} kept)")
+    return
+  }
+  shelf_write(items)
+  toast(tr("没有关闭过的贴图"))
+}
+
+fn destroy_pin(p : Pin) -> Unit {
+  p.shelve.v = false
+  close_pin(p.wid.v)
+}
+
+test "pin stack keeps the newest fifty, last closed first" {
+  let one = fn(slot : Int) {
+    Shelved::{ slot, x: slot, y: 2, w: 30, h: 40, zx: 1.5, zy: 1.5, turns: 1, flipped: true, alpha: 204, top: false }
+  }
+  let mut items : Array[Shelved] = []
+  for i in 0..<shelf_most {
+    items = shelf_push(items, one(i))
+  }
+  assert_eq(items.length(), shelf_most)
+  assert_eq(shelf_free_slot(items), -1)
+  items = shelf_push(items, one(0))
+  assert_eq(items.length(), shelf_most)
+  assert_eq(items[0].slot, 1)
+  assert_eq(items[items.length() - 1].slot, 0)
+  let back = shelf_parse(shelf_text(items))
+  assert_eq(back.length(), shelf_most)
+  let last = back[back.length() - 1]
+  assert_true(last.slot == 0 && last.zx == 1.5 && last.turns == 1 && last.flipped && last.alpha == 204 && !last.top)
+  assert_eq(shelf_free_slot([one(0), one(2)]), 1)
+  assert_eq(shelf_parse("not json").length(), 0)
+}

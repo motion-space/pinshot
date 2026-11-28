@@ -41,6 +41,7 @@ struct Pin {
   ocr_click_at : signals::Ref[Double]
   ocr_click_word : signals::Ref[Int]
   ocr_clicks : signals::Ref[Int]
+  shelve : signals::Ref[Bool]
 }
 
 struct PinSizing {
@@ -151,6 +152,7 @@ fn open_pin(png : Bytes, x : Int, y : Int, w : Int, h : Int, zoom~ : Double = 1.
     ocr_click_at: signals::ref_new(-10000.0),
     ocr_click_word: signals::ref_new(-1),
     ocr_clicks: signals::ref_new(0),
+    shelve: signals::ref_new(true),
   }
   pins[what] = p
   let wid = ui::window_open_here(what)
@@ -212,7 +214,11 @@ fn pin_of_wid(wid : Int) -> Option[(String, Pin)] {
 }
 
 fn close_pin(wid : Int) -> Unit {
-  guard pin_of_wid(wid) is Some((_, _)) else { return }
+  guard pin_of_wid(wid) is Some((_, p)) else { return }
+  if p.shelve.v {
+    p.shelve.v = false
+    shelve_pin(p)
+  }
   close_window(wid)
 }
 
@@ -699,6 +705,7 @@ fn pin_menu(p : Pin) -> Unit {
     "a40\t\{o} 40%\t" + (if a == 102 { "c" } else { "" }),
     "-",
     "close\t" + tr("关闭") + "\tEsc",
+    "destroy\t" + tr("销毁（不进贴图历史）") + "\t" + key_hint("Ctrl+D"),
     "close-all\t" + tr("关闭全部贴图") + "\t",
   ] {
     lines.push(item)
@@ -727,6 +734,7 @@ fn pin_menu(p : Pin) -> Unit {
     "a60" => set_alpha(p, 153)
     "a40" => set_alpha(p, 102)
     "close" => close_pin(p.wid.v)
+    "destroy" => destroy_pin(p)
     "close-all" => {
       let wids : Array[Int] = []
       for k in pins.keys() {
@@ -735,6 +743,7 @@ fn pin_menu(p : Pin) -> Unit {
           None => ()
         }
       }
+      shelve_pins(wids)
       for w in wids {
         close_pin(w)
       }
@@ -1032,6 +1041,8 @@ fn pin_keys() -> view::Keymap {
     k(ui::key_code_select_all, "select-all", 0),
     ch('o', "ocr", shortcut_mod()),
     ch('s', "save", shortcut_mod()),
+    ch('d', "destroy", shortcut_mod()),
+    ch('w', "close-pin", shortcut_mod()),
     ch('t', "top", shortcut_mod()),
     ch('0', "zoom1", shortcut_mod()),
     ch('r', "turn-cw", shortcut_mod()),
@@ -1098,6 +1109,8 @@ fn pin_actions(root : view::View, p : Pin) -> Unit {
   })
   on("ocr", fn() { pin_toggle_ocr(p) })
   on("save", fn() { save_pin(p) })
+  on("destroy", fn() { destroy_pin(p) })
+  on("close-pin", fn() { close_pin(p.wid.v) })
   on("top", fn() {
     let top = !p.top.untracked()
     p.top.set(top)

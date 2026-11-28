@@ -225,15 +225,15 @@ static OSStatus hitKey(EventHandlerCallRef next, EventRef event, void *user) {
   if (key.id == 1)
     ps_capture_ask();
   else
-    ps_post(@{@"do" : key.id == 2 ? @"pin-clipboard" : @"pins"});
+    ps_post(@{@"do" : key.id == 2 ? @"pin-clipboard" : key.id == 4 ? @"pin-restore" : @"pins"});
   return noErr;
 }
 int ps_hotkey(int which, int mods, int vk) {
   if (testing())
     return 1;
-  static EventHotKeyRef keys[4];
+  static EventHotKeyRef keys[5];
   static EventHandlerRef handler;
-  if (which < 1 || which > 3)
+  if (which < 1 || which > 4)
     return 0;
   if (keys[which]) {
     UnregisterEventHotKey(keys[which]);
@@ -511,6 +511,13 @@ moonbit_bytes_t ps_wallpaper(void) {
 }
 moonbit_bytes_t ps_read_file(moonbit_bytes_t path) {
   return ps_data([NSData dataWithContentsOfFile:str(path)]);
+}
+void ps_delete_file(moonbit_bytes_t path) {
+  [NSFileManager.defaultManager removeItemAtPath:str(path) error:nil];
+}
+int32_t ps_rect_shown(int32_t x, int32_t y, int32_t w, int32_t h) {
+  (void)x, (void)y, (void)w, (void)h;
+  return 1;
 }
 int ps_write_file(moonbit_bytes_t path, moonbit_bytes_t bytes) {
   NSString *dest = str(path);

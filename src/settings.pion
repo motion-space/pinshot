@@ -10,6 +10,7 @@ struct Settings {
   capture_key : Hotkey
   pin_key : Hotkey
   confirm_key : Hotkey
+  restore_key : Hotkey
   pin_top : Bool
   pin_alpha : Int
   save_format : Int
@@ -33,6 +34,11 @@ let pin_choices : Array[(String, Int, Int)] = [
   (if hostapi::platform() == 0 { "⌃2" } else { "Ctrl+2" }, 2, 0x32),
   ("F3", 0, 0x72),
   ("F2", 0, 0x71),
+  ("不用快捷键", 0, 0),
+]
+
+let restore_choices : Array[(String, Int, Int)] = [
+  (if hostapi::platform() == 0 { "⌃3" } else { "Ctrl+3" }, 2, 0x33),
   ("不用快捷键", 0, 0),
 ]
 
@@ -122,6 +128,7 @@ fn default_settings() -> Settings {
     capture_key: hotkey_of(key_choices[0]),
     pin_key: hotkey_of(pin_choices[0]),
     confirm_key: hotkey_of(confirm_choices[0]),
+    restore_key: hotkey_of(restore_choices[0]),
     pin_top: true,
     pin_alpha: 255,
     save_format: 0,
@@ -139,6 +146,7 @@ let settings : signals::Signal[Settings] = signals::signal_by(Settings::{
   capture_key: hotkey_of(key_choices[0]),
   pin_key: hotkey_of(pin_choices[0]),
   confirm_key: hotkey_of(confirm_choices[0]),
+  restore_key: hotkey_of(restore_choices[0]),
   pin_top: true,
   pin_alpha: 255,
   save_format: 0,
@@ -155,6 +163,8 @@ let capture_key_ok : signals::Signal[Bool] = signals::signal(true)
 
 let pin_key_ok : signals::Signal[Bool] = signals::signal(true)
 
+let restore_key_ok : signals::Signal[Bool] = signals::signal(true)
+
 let autostart : signals::Signal[Bool] = signals::signal(false)
 
 fn settings_path() -> String {
@@ -165,6 +175,9 @@ fn init_key_choices() -> Unit {
   key_choices.clear()
   pin_choices.clear()
   confirm_choices.clear()
+  restore_choices.clear()
+  restore_choices.push((if hostapi::platform() == 0 { "⌃3" } else { "Ctrl+3" }, 2, 0x33))
+  restore_choices.push(("不用快捷键", 0, 0))
   if hostapi::platform() == 0 {
     for c in [("⌃⌥A", 3, 0x41), ("⌃1", 2, 0x31), ("F1", 0, 0x70), ("⌃⇧A", 6, 0x41)] {
       key_choices.push(c)
@@ -218,6 +231,7 @@ fn load_settings() -> Unit {
         capture_key: hotkey("capture_key", "capture_keys", key_choices),
         pin_key: hotkey("pin_key", "pin_keys", pin_choices),
         confirm_key: hotkey("confirm_key", "confirm_keys", confirm_choices),
+        restore_key: hotkey("restore_key", "restore_keys", restore_choices),
         pin_top: flag("pin_top", d.pin_top),
         pin_alpha: clampi(num("pin_alpha", d.pin_alpha), 25, 255),
         save_format: match text("save_format", "png") {
@@ -278,6 +292,7 @@ fn save_settings() -> Unit {
   o["capture_key"] = hotkey(s.capture_key)
   o["pin_key"] = hotkey(s.pin_key)
   o["confirm_key"] = hotkey(s.confirm_key)
+  o["restore_key"] = hotkey(s.restore_key)
   o["pin_top"] = json_bool(s.pin_top)
   o["pin_alpha"] = json_num(s.pin_alpha.to_double())
   o["save_format"] = json_str(["png", "jpg-92", "jpg-80"][s.save_format])
@@ -314,7 +329,7 @@ fn change_settings(f : (Settings) -> Settings) -> Unit {
   if s.language != was.language {
     apply_language(s.language)
   }
-  if s.capture_key != was.capture_key || s.pin_key != was.pin_key || s.language != was.language {
+  if s.capture_key != was.capture_key || s.pin_key != was.pin_key || s.restore_key != was.restore_key || s.language != was.language {
     apply_keys()
   }
 }
@@ -326,7 +341,8 @@ fn apply_keys() -> Unit {
   let pv = s.pin_key.vk
   capture_key_ok.set(ps_hotkey(1, s.capture_key.mods, s.capture_key.vk) == 1)
   pin_key_ok.set(ps_hotkey(2, s.pin_key.mods, pv) == 1)
-  log("keys: capture \{cw} \{if capture_key_ok.untracked() { "ok" } else { "taken by another program" }}, pin \{pw} \{if pin_key_ok.untracked() { "ok" } else { "taken by another program" }}")
+  restore_key_ok.set(ps_hotkey(4, s.restore_key.mods, s.restore_key.vk) == 1)
+  log("keys: capture \{cw} \{if capture_key_ok.untracked() { "ok" } else { "taken by another program" }}, pin \{pw} \{if pin_key_ok.untracked() { "ok" } else { "taken by another program" }}, reopen \{key_words(s.restore_key, restore_choices)} \{if restore_key_ok.untracked() { "ok" } else { "taken by another program" }}")
   if !capture_key_ok.untracked() {
     ps_tray_note(
       cstr(tr("截图快捷键被其他程序占用：") + cw),
@@ -335,10 +351,14 @@ fn apply_keys() -> Unit {
   }
   let pin_words = if pv == 0 { tr("贴图剪贴板中的图片") } else { tr("贴图剪贴板中的图片") + "\u{8}" + pw }
   let capture_words = if s.capture_key.vk == 0 { tr("截图") } else { tr("截图") + "\u{8}" + cw }
+  let rw = key_words(s.restore_key, restore_choices)
+  let restore_words = if s.restore_key.vk == 0 { tr("恢复关闭的贴图") } else { tr("恢复关闭的贴图") + "\u{8}" + rw }
   let menu = "capture\t" +
     capture_words +
     "\npin-clip\t" +
     pin_words +
+    "\npin-restore\t" +
+    restore_words +
     "\npins\t" +
     tr("显示/隐藏全部贴图") +
     "\n-\nsettings\t" +
@@ -392,6 +412,7 @@ fn record_key(which : Int) -> Unit {
   }
   let _ = ps_hotkey(1, 0, 0)
   let _ = ps_hotkey(2, 0, 0)
+  let _ = ps_hotkey(4, 0, 0)
   if ps_key_record(1) == 1 {
     recording.set(which)
   } else {
@@ -407,6 +428,8 @@ fn clear_key(which : Int) -> Unit {
     change_settings(fn(s) { Settings::{ ..s, capture_key: Hotkey::{ mods: 0, vk: 0 } } })
   } else if which == 2 {
     change_settings(fn(s) { Settings::{ ..s, pin_key: Hotkey::{ mods: 0, vk: 0 } } })
+  } else if which == 4 {
+    change_settings(fn(s) { Settings::{ ..s, restore_key: Hotkey::{ mods: 0, vk: 0 } } })
   } else {
     change_settings(fn(s) { Settings::{ ..s, confirm_key: Hotkey::{ mods: 0, vk: 0 } } })
   }
@@ -415,7 +438,7 @@ fn clear_key(which : Int) -> Unit {
 
 fn keys_set_again(before : Settings) -> Unit {
   let s = settings.untracked()
-  if s.capture_key == before.capture_key && s.pin_key == before.pin_key && s.language == before.language {
+  if s.capture_key == before.capture_key && s.pin_key == before.pin_key && s.restore_key == before.restore_key && s.language == before.language {
     apply_keys()
   }
 }
@@ -471,18 +494,27 @@ fn key_pressed(how : String, mods : Int, vk : Int) -> Unit {
     )
     return
   }
-  let other = if which == 1 { was.pin_key } else { was.capture_key }
-  if other == h {
-    trouble(if which == 1 { tr("和「贴剪贴板图片」的快捷键相同") } else { tr("和「截图」的快捷键相同") })
+  if which != 1 && was.capture_key == h {
+    trouble(tr("和「截图」的快捷键相同"))
+    return
+  }
+  if which != 2 && was.pin_key == h {
+    trouble(tr("和「贴剪贴板图片」的快捷键相同"))
+    return
+  }
+  if which != 4 && was.restore_key == h {
+    trouble(tr("和「恢复关闭的贴图」的快捷键相同"))
     return
   }
   if ps_hotkey(which, mods, vk) != 1 {
     trouble(key_words(h, []) + tr(" 已被其他程序占用，换一个"))
     return
   }
-  log("keys: \{if which == 1 { "capture" } else { "pin" }} set to \{key_words(h, [])}")
+  log("keys: \{if which == 1 { "capture" } else if which == 4 { "restore" } else { "pin" }} set to \{key_words(h, [])}")
   if which == 1 {
     change_settings(fn(s) { Settings::{ ..s, capture_key: h } })
+  } else if which == 4 {
+    change_settings(fn(s) { Settings::{ ..s, restore_key: h } })
   } else {
     change_settings(fn(s) { Settings::{ ..s, pin_key: h } })
   }
@@ -686,6 +718,9 @@ fn keys_page(p : view::View) -> Unit {
       set_row(g, "贴剪贴板图片", fn(r) {
         key_box(r, 2)
       }, note=fn() { key_note(2) })
+      set_row(g, "恢复关闭的贴图", fn(r) {
+        key_box(r, 4)
+      }, note=fn() { key_note(4) })
       set_row(g, "额外确认并复制", fn(r) {
         key_box(r, 3)
       }, note=fn() { key_note(3) }, note_ink=fn() { if key_trouble.get().0 == 3 { 0xF5A524FFL } else { set_muted } })
@@ -711,6 +746,14 @@ fn keys_page(p : view::View) -> Unit {
           fn(i) { change_settings(fn(s) { Settings::{ ..s, pin_key: hotkey_of(pin_choices[i]) } }) },
         )
       }, note=fn() { key_note(2) })
+      set_row(g, "恢复关闭的贴图", fn(r) {
+        choice(
+          r,
+          choice_labels(restore_choices),
+          fn() { choice_of(restore_choices, settings.get().restore_key) },
+          fn(i) { change_settings(fn(s) { Settings::{ ..s, restore_key: hotkey_of(restore_choices[i]) } }) },
+        )
+      }, note=fn() { key_note(4) })
       set_row(g, "额外确认并复制", fn(r) {
         choice(
           r,
@@ -749,7 +792,7 @@ fn key_note(which : Int) -> String {
     } else {
       tr("Enter、Ctrl+C 与双击始终可用；这里可额外再绑一个单键（如 Space）或组合键")
     }
-  } else if !(if which == 1 { capture_key_ok.get() } else { pin_key_ok.get() }) {
+  } else if !(if which == 1 { capture_key_ok.get() } else if which == 4 { restore_key_ok.get() } else { pin_key_ok.get() }) {
     tr("已被其他程序占用，换一个")
   } else {
     ""
@@ -763,6 +806,8 @@ fn key_box(parent : view::View, which : Int) -> Unit {
       s.capture_key.vk
     } else if which == 2 {
       s.pin_key.vk
+    } else if which == 4 {
+      s.restore_key.vk
     } else {
       s.confirm_key.vk
     }
@@ -775,6 +820,8 @@ fn key_box(parent : view::View, which : Int) -> Unit {
       key_words(settings.get().capture_key, key_choices)
     } else if which == 2 {
       key_words(settings.get().pin_key, pin_choices)
+    } else if which == 4 {
+      key_words(settings.get().restore_key, restore_choices)
     } else {
       key_words(settings.get().confirm_key, confirm_choices)
     }

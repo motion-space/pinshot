@@ -235,6 +235,8 @@ extern "C" fn c_ps_write_file(p : Ptr, pl : Int64, d : Ptr, dl : Int64) -> Int =
 extern "C" fn c_ps_save_dialog(wid : Int, dir : Ptr, dl : Int64, name : Ptr, nl : Int64) -> Ptr = "pion_ps_save_dialog"
 extern "C" fn c_ps_pick_folder(wid : Int, dir : Ptr, dl : Int64) -> Ptr = "pion_ps_pick_folder"
 extern "C" fn c_ps_reveal(p : Ptr, pl : Int64) -> Unit = "pion_ps_reveal"
+extern "C" fn c_ps_delete_file(p : Ptr, pl : Int64) -> Unit = "pion_ps_delete_file"
+extern "C" fn ps_rect_shown(x : Int, y : Int, w : Int, h : Int) -> Int = "ps_rect_shown"
 extern "C" fn c_ps_popup_menu(wid : Int, s : Ptr, sl : Int64) -> Ptr = "pion_ps_popup_menu"
 extern "C" fn c_ps_ocr(id : Int, png : Ptr, pl : Int64) -> Int = "pion_ps_ocr"
 extern "C" fn c_ps_ocr_now(png : Ptr, pl : Int64) -> Ptr = "pion_ps_ocr_now"
@@ -298,6 +300,9 @@ fn ps_save_dialog(wid : Int, dir : Bytes, name : Bytes) -> Bytes {
 }
 fn ps_pick_folder(wid : Int, dir : Bytes) -> Bytes {
   take_mb_bytes(c_ps_pick_folder(wid, bytes_data_ptr(dir), dir.length().to_int64()))
+}
+fn ps_delete_file(path : Bytes) -> Unit {
+  c_ps_delete_file(bytes_data_ptr(path), path.length().to_int64())
 }
 fn ps_reveal(path : Bytes) -> Unit {
   c_ps_reveal(bytes_data_ptr(path), path.length().to_int64())
